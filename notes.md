@@ -36,11 +36,16 @@ Web2Wiki's public code (`clean_links.py`) normalizes titles and extracts domains
 
 ## Reference entries
 
-- Piccardi, T., Redi, M., Colavizza, G., and West, R. 2021. *On the Value of Wikipedia as a Gateway to the Web.* In Proceedings of The Web Conference 2021 (WWW '21), Ljubljana, Slovenia. ACM. <https://doi.org/10.1145/3442381.3450136>
-- Veselovsky, V., Piccardi, T., Anderson, A., West, R., and Arora, A. 2026. *Web2Wiki: Characterizing Wikipedia Linking Across the Web.* Proceedings of the Twentieth International AAAI Conference on Web and Social Media (ICWSM 2026). <https://ojs.aaai.org/index.php/ICWSM/article/view/42754/50314>
+- Piccardi, T., Redi, M., Colavizza, G., and West, R. 2021. *On the Value of Wikipedia as a Gateway to the Web.* In Proceedings of The Web Conference 2021 (WWW '21), April 19–23, 2021, Ljubljana, Slovenia. ACM, New York, NY, USA, 12 pages. <https://doi.org/10.1145/3442381.3450136>
+- Veselovsky, V., Piccardi, T., Anderson, A., West, R., and Arora, A. 2026. *Web2Wiki: Characterizing Wikipedia Linking Across the Web.* In Proceedings of the Twentieth International AAAI Conference on Web and Social Media (ICWSM 2026), 2345–2357. <https://ojs.aaai.org/index.php/ICWSM/article/view/42754>
 - Mitrevski, B., Piccardi, T., and West, R. 2020. *WikiHist.html: English Wikipedia's full revision history in HTML format.* ICWSM. (Cited by WWW '21 for the HTML point; not yet read.)
+
+## How the authors ask to be cited
+
+- **WWW '21:** The paper prints an ACM Reference Format on p. 249 (used above). It is CC-BY 4.0 and asks for attribution on reuse. Its data can't be shared publicly. Code: <https://github.com/epfl-dlab/WikipediaAsWebGateway>.
+- **ICWSM 2026:** No citation statement and no DOI in the PDF. The dataset will be released on Zenodo under CC-BY-SA 4.0 (DOI not yet known). Code: <https://github.com/vminvsky/web2wiki>. Appendix B has a leftover anonymous-review link (`github.com/blind-anonymous/web2wiki`); use the vminvsky link instead.
 
 ## Cautions
 
-- The ICWSM PDF shows pages 2345–2357. The final published page numbers or DOI may differ, so take final citation details from the publisher's page.
-- Only the data and methods sections were read closely. Cite only the points in the tables above unless the other sections have been read.
+- Both PDFs were read in full. Page numbers above are as printed in each PDF.
+- The ICWSM entry is formatted in AAAI style from the header, since the paper has no citation block. Check the publisher's page for a DOI and volume before final submission.
