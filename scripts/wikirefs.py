@@ -114,7 +114,8 @@ def is_wikimedia(host):
 
 
 def domain_of(url):
-    return ext(url).registered_domain
+    host = urlsplit(url).hostname or ""
+    return ext(url).top_domain_under_public_suffix or host
 
 
 def run_tests():
