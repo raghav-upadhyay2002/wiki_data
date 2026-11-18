@@ -211,6 +211,8 @@ def links_at_dates(pageid):
 
 import os
 RANK = {"infobox": 0, "references": 1, "body": 2}
+FIND_SOURCES = re.compile(
+    r"google\.com/search|scholar\.google\.com/scholar|jstor\.org/action/doBasicSearch")
 HIST_OUT = "data/history_links.csv"
 
 
@@ -222,6 +224,8 @@ def clean_snapshot(links):
         if not n:
             continue
         if is_wikimedia(urlsplit(n).hostname or ""):
+            continue
+        if FIND_SOURCES.search(n):
             continue
         if n not in best or RANK[loc] < RANK[best[n]]:
             best[n] = loc          # keep infobox > references > body
@@ -258,6 +262,7 @@ ORDER = ["2017-11-30", "2018-11-30", "2019-11-30", "2020-11-30",
 
 def run_cohorts():
     h = pd.read_csv(HIST_OUT)
+    h = h[~h["norm_url"].str.contains(FIND_SOURCES)]
     h["step"] = h["snapshot"].map({s: i for i, s in enumerate(ORDER)})
     g = h.groupby(["pageid", "norm_url"])
     c = pd.concat([
