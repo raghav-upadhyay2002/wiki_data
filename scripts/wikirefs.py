@@ -17,6 +17,8 @@ WIKIMEDIA = ("wikipedia.org", "wikimedia.org", "wikidata.org",
              "wikivoyage.org")
 
 TRACKING = re.compile(r"^(utm_|fbclid$|gclid$)", re.I)
+FIND_SOURCES = re.compile(
+    r"google\.com/search|scholar\.google\.com/scholar|jstor\.org/action/doBasicSearch")
 ext = tldextract.TLDExtract(suffix_list_urls=())
 
 
@@ -81,10 +83,16 @@ def extract_links(html):
 
 
 def unwrap_archive(url):
-    """web.archive.org/web/<digits>/<original>  ->  <original>"""
+    """web.archive.org/web/<digits>/<original>  ->  <original>
+       webcitation.org/<id>?url=<original>      ->  <original>"""
     m = re.search(r"web\.archive\.org/web/\d+[a-z_]*/(https?:?/*.+)$", url)
     if m:
         return re.sub(r"^(https?):/*", r"\1://", m.group(1))
+    s = urlsplit(url)
+    if (s.hostname or "").lower().removeprefix("www.") == "webcitation.org":
+        m = re.match(r"url=(.+)$", s.query)
+        if m:
+            return m.group(1)
     return url
 
 
@@ -125,11 +133,44 @@ def run_tests():
         "https://doi.org/10.1093%2Fref%3Aodnb%2F36578",
         "https://www.oxforddnb.com/help/subscribe#public",
         "https://wikipedialibrary.wmflabs.org/partners/88/",
+        "https://webcitation.org/5l9vPO85Y?url=http://www.canoeicf.com/a.pdf",
     ]
     for t in tests:
         n = normalize(t)
         host = urlsplit(n).hostname
         print(n, "| wikimedia:", is_wikimedia(host), "| domain:", domain_of(n))
+
+
+def clean_raw(df, find_sources=True):
+    """Raw (pageid, title, location, raw_url) rows -> cleaned rows + funnel counts."""
+    funnel = {"raw links": len(df)}
+    df = df.copy()
+    df["norm_url"] = df["raw_url"].map(normalize)
+    df = df.dropna(subset=["norm_url"])
+    df["host"] = df["norm_url"].map(lambda u: urlsplit(u).hostname or "")
+
+    df = df[~df["host"].map(is_wikimedia)]
+    funnel["after dropping Wikimedia sites"] = len(df)
+
+    if find_sources:
+        df = df[~df["norm_url"].str.contains(FIND_SOURCES)]
+        funnel["after dropping find-sources links"] = len(df)
+
+    rank = {"infobox": 0, "references": 1, "body": 2}
+    df = df.assign(rank=df["location"].map(rank)).sort_values("rank")
+    df = df.drop_duplicates(subset=["pageid", "norm_url"]).drop(columns="rank")
+    funnel["after removing duplicates within an article"] = len(df)
+
+    df["domain"] = df["norm_url"].map(domain_of)
+    return df, funnel
+
+
+def reclean():
+    """Re-run cleaning on saved raw links (no re-fetch, no re-sampling)."""
+    df, funnel = clean_raw(pd.read_csv("data/current_links_raw.csv"))
+    df.to_csv("data/current_links_clean.csv", index=False)
+    for k, v in funnel.items():
+        print(f"{k}: {v}")
 
 
 def run_step4(n=50):
@@ -154,20 +195,7 @@ def run_step4(n=50):
     df = pd.DataFrame(rows)
     df.to_csv("data/current_links_raw.csv", index=False)
 
-    funnel = {"raw links": len(df)}
-    df["norm_url"] = df["raw_url"].map(normalize)
-    df = df.dropna(subset=["norm_url"])
-    df["host"] = df["norm_url"].map(lambda u: urlsplit(u).hostname or "")
-
-    df = df[~df["host"].map(is_wikimedia)]
-    funnel["after dropping Wikimedia sites"] = len(df)
-
-    rank = {"infobox": 0, "references": 1, "body": 2}
-    df = df.assign(rank=df["location"].map(rank)).sort_values("rank")
-    df = df.drop_duplicates(subset=["pageid", "norm_url"]).drop(columns="rank")
-    funnel["after removing duplicates within an article"] = len(df)
-
-    df["domain"] = df["norm_url"].map(domain_of)
+    df, funnel = clean_raw(df)
     df.to_csv("data/current_links_clean.csv", index=False)
 
     print()
@@ -211,8 +239,6 @@ def links_at_dates(pageid):
 
 import os
 RANK = {"infobox": 0, "references": 1, "body": 2}
-FIND_SOURCES = re.compile(
-    r"google\.com/search|scholar\.google\.com/scholar|jstor\.org/action/doBasicSearch")
 HIST_OUT = "data/history_links.csv"
 
 
@@ -277,9 +303,26 @@ def run_cohorts():
     print(out.reindex([s for s in ORDER if s in out.index]))
 
 
+def fix_history():
+    h = pd.read_csv(HIST_OUT)
+    h["norm_url"] = h["norm_url"].map(normalize)
+    h = h.dropna(subset=["norm_url"])
+    h["rank"] = h["location"].map(RANK)
+    h = (h.sort_values("rank")
+          .drop_duplicates(subset=["pageid", "snapshot", "norm_url"])
+          .drop(columns="rank"))
+    h["domain"] = h["norm_url"].map(domain_of)
+    h.to_csv(HIST_OUT, index=False)
+    print(len(h), "rows")
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "test":
         run_tests()
+    elif len(sys.argv) > 1 and sys.argv[1] == "reclean":
+        reclean()
+    elif len(sys.argv) > 1 and sys.argv[1] == "fixhist":
+        fix_history()
     elif len(sys.argv) > 1 and sys.argv[1] == "cohorts":
         run_cohorts()
     elif len(sys.argv) > 1 and sys.argv[1] == "history":
