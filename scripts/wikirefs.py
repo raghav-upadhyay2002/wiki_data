@@ -115,7 +115,7 @@ def is_wikimedia(host):
 
 def domain_of(url):
     host = urlsplit(url).hostname or ""
-    return ext(url).top_domain_under_public_suffix or host
+    return ext(url).registered_domain or host
 
 
 def run_tests():
@@ -181,8 +181,113 @@ def run_step4(n=50):
     print(df["domain"].value_counts().head(15))
 
 
+DATES = ["2017-11-30", "2018-11-30", "2019-11-30",
+         "2020-11-30", "2021-11-30", "2022-11-30"]
+
+
+def revision_at(pageid, date):
+    """Return the revision ID that was live at the end of `date`, or None."""
+    data = api_get({
+        "action": "query", "prop": "revisions", "pageids": pageid,
+        "rvlimit": 1, "rvdir": "older", "rvstart": date + "T23:59:59Z",
+        "rvprop": "ids|timestamp", "format": "json", "formatversion": 2,
+    })
+    revs = data["query"]["pages"][0].get("revisions")
+    return revs[0]["revid"] if revs else None
+
+
+def links_at_dates(pageid):
+    """For one article, return {date: list of links} for each date in DATES."""
+    out = {}
+    for d in DATES:
+        rev = revision_at(pageid, d)
+        if rev is None:
+            out[d] = None          # article did not exist yet
+            continue
+        html = get_html(oldid=rev)
+        out[d] = extract_links(html)
+    return out
+
+
+import os
+RANK = {"infobox": 0, "references": 1, "body": 2}
+HIST_OUT = "data/history_links.csv"
+
+
+def clean_snapshot(links):
+    """links = [(url, location), ...]  ->  {norm_url: location}"""
+    best = {}
+    for url, loc in links:
+        n = normalize(url)
+        if not n:
+            continue
+        if is_wikimedia(urlsplit(n).hostname or ""):
+            continue
+        if n not in best or RANK[loc] < RANK[best[n]]:
+            best[n] = loc          # keep infobox > references > body
+    return best
+
+
+def run_history(n=10):
+    arts = pd.read_csv("data/sample_articles.csv").head(n)
+    done = set(pd.read_csv(HIST_OUT)["pageid"]) if os.path.exists(HIST_OUT) else set()
+    for _, a in arts.iterrows():
+        pid = int(a["pageid"])
+        if pid in done:
+            continue
+        snaps = links_at_dates(pid)
+        snaps["now"] = extract_links(get_html(pageid=pid))
+        rows = []
+        for d, links in snaps.items():
+            if links is None:
+                continue
+            for u, loc in clean_snapshot(links).items():
+                rows.append({"pageid": pid, "title": a["title"], "snapshot": d,
+                             "location": loc, "norm_url": u, "domain": domain_of(u)})
+        if rows:
+            pd.DataFrame(rows).to_csv(HIST_OUT, mode="a", index=False,
+                                      header=not os.path.exists(HIST_OUT))
+        print("done", pid, a["title"], len(rows), "rows")
+    h = pd.read_csv(HIST_OUT)
+    print(h.groupby("snapshot")["norm_url"].count())
+
+
+ORDER = ["2017-11-30", "2018-11-30", "2019-11-30", "2020-11-30",
+         "2021-11-30", "2022-11-30", "now"]
+
+
+def run_cohorts():
+    h = pd.read_csv(HIST_OUT)
+    h["step"] = h["snapshot"].map({s: i for i, s in enumerate(ORDER)})
+    g = h.groupby(["pageid", "norm_url"])
+    c = pd.concat([
+        g["step"].min().rename("first_step"),
+        g["snapshot"].apply(lambda s: "now" in set(s)).rename("alive_now"),
+    ], axis=1).reset_index()
+    c["cohort"] = c["first_step"].map(lambda i: ORDER[i])
+    c.to_csv("data/link_cohorts.csv", index=False)
+    out = c.groupby("cohort").agg(links=("norm_url", "count"),
+                                  still_there=("alive_now", "sum"))
+    out["pct_still_there"] = (100 * out["still_there"] / out["links"]).round(1)
+    print(out.reindex([s for s in ORDER if s in out.index]))
+
+
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "test":
         run_tests()
+    elif len(sys.argv) > 1 and sys.argv[1] == "cohorts":
+        run_cohorts()
+    elif len(sys.argv) > 1 and sys.argv[1] == "history":
+        run_history(int(sys.argv[2]) if len(sys.argv) > 2 else 10)
+    elif len(sys.argv) > 1 and sys.argv[1] == "rev":
+        pid = int(sys.argv[2])
+        for d in DATES:
+            print(d, revision_at(pid, d))
+    elif len(sys.argv) > 1 and sys.argv[1] == "hist":
+        res = links_at_dates(int(sys.argv[2]))
+        for d, links in res.items():
+            print(d, "no article" if links is None else len(links))
+        first = next((l for l in res.values() if l), None)
+        print(first[:2] if first else "no links found")
     else:
         run_step4()
