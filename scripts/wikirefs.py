@@ -209,6 +209,91 @@ def run_step4(n=50):
     print(df["domain"].value_counts().head(15))
 
 
+import gzip, csv
+
+EL_ROW = re.compile(r"\((\d+),(\d+),'((?:[^'\\]|\\.)*)',(?:'((?:[^'\\]|\\.)*)'|NULL)\)")
+PAGE_ROW = re.compile(r"\((\d+),0,'(?:[^'\\]|\\.)*',0,")
+
+
+def unescape(s):
+    return re.sub(r"\\(.)", r"\1", s)
+
+
+def host_from_index(domain_index):
+    """'http://edu.berkeley.housing.www.'  ->  ('http', 'www.housing.berkeley.edu')"""
+    scheme, _, rest = domain_index.partition("://")
+    labels = [x for x in rest.split(".") if x]
+    port = ""
+    if labels and labels[-1].startswith(":"):
+        port = labels.pop()
+    return scheme, ".".join(reversed(labels)) + port
+
+
+def article_ids(page_dump, max_id=100_000_000):
+    """Page ids of main-namespace, non-redirect pages, as a 0/1 table indexed by page id."""
+    keep = bytearray(max_id + 1)
+    with gzip.open(page_dump, "rt", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            for m in PAGE_ROW.finditer(line):
+                pid = int(m.group(1))
+                if pid <= max_id:
+                    keep[pid] = 1
+    return keep
+
+
+def stream_links(el_dump, keep, limit=None):
+    """Yield (pageid, url) for every external link on a kept page."""
+    n = 0
+    with gzip.open(el_dump, "rt", encoding="utf-8", errors="replace") as f:
+        for line in f:
+            for m in EL_ROW.finditer(line):
+                pid = int(m.group(2))
+                if pid >= len(keep) or not keep[pid]:
+                    continue
+                scheme, host = host_from_index(unescape(m.group(3)))
+                path = unescape(m.group(4) or "")
+                yield pid, f"{scheme}://{host}{path}"
+                n += 1
+                if limit and n >= limit:
+                    return
+
+
+def run_dump(page_dump, el_dump, limit=None):
+    t0 = time.time()
+    print("Reading page dump (keeping main-namespace, non-redirect articles)...")
+    keep = article_ids(page_dump)
+    print(f"  articles kept: {keep.count(1):,}  ({time.time()-t0:.0f}s)")
+
+    raw = nonweb = bad = wikimedia = written = 0
+    with gzip.open("data/dump_links_clean.csv.gz", "wt", newline="", encoding="utf-8") as out:
+        w = csv.writer(out)
+        w.writerow(["pageid", "norm_url", "domain"])
+        for pid, url in stream_links(el_dump, keep, limit):
+            raw += 1
+            if raw % 500_000 == 0:
+                print(f"  {raw:,} links processed ({time.time()-t0:.0f}s)")
+            if not url.startswith(("http://", "https://")):
+                nonweb += 1
+                continue
+            norm = normalize(url)
+            if norm is None:
+                bad += 1
+                continue
+            if is_wikimedia(urlsplit(norm).hostname or ""):
+                wikimedia += 1
+                continue
+            w.writerow([pid, norm, domain_of(norm)])
+            written += 1
+
+    print()
+    print(f"links on article pages:      {raw:,}")
+    print(f"  not web links (mailto...): {nonweb:,}")
+    print(f"  unparseable:               {bad:,}")
+    print(f"  Wikimedia sites dropped:   {wikimedia:,}")
+    print(f"  written to CSV:            {written:,}")
+    print(f"time: {time.time()-t0:.0f}s")
+
+
 DATES = ["2017-11-30", "2018-11-30", "2019-11-30",
          "2020-11-30", "2021-11-30", "2022-11-30"]
 
@@ -327,6 +412,9 @@ if __name__ == "__main__":
         run_cohorts()
     elif len(sys.argv) > 1 and sys.argv[1] == "history":
         run_history(int(sys.argv[2]) if len(sys.argv) > 2 else 10)
+    elif len(sys.argv) > 1 and sys.argv[1] == "dump":
+        limit = int(sys.argv[4]) if len(sys.argv) > 4 else None
+        run_dump(sys.argv[2], sys.argv[3], limit)
     elif len(sys.argv) > 1 and sys.argv[1] == "rev":
         pid = int(sys.argv[2])
         for d in DATES:
